@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runComputerTurn } from "../src/core/ai.js";
+import {
+  createStrategicPlan,
+  evaluateEnemyWeakness,
+  evaluateLocalPower,
+  estimateCutoffValue,
+  runComputerTurn,
+  scoreFront
+} from "../src/core/ai.js";
 import { buildBuilding, canBuild, getBuildingCost } from "../src/core/buildings.js";
 import { canCapture, captureTile } from "../src/core/combat.js";
 import { applyStartOfTurnEconomy, calculateBuildingUpkeep, calculateGrossIncome, calculateTotalUpkeep, calculateUnitUpkeep } from "../src/core/economy.js";
@@ -490,6 +497,79 @@ test("computer moves idle units as a group toward its chosen front", () => {
   assert.ok(unitTiles.every((tile) => hexDistance(tile, { q: 3, r: 0 }) <= 1));
 });
 
+test("computer identifies weak exposed enemies as priority targets", () => {
+  const state = createAiStrategicWarTestState();
+
+  const weak = evaluateEnemyWeakness(state, 1, 2);
+  const strong = evaluateEnemyWeakness(state, 1, 3);
+
+  assert.ok(weak.tileCount < strong.tileCount);
+  assert.ok(weak.touchingEnemyCount >= 2);
+  assert.ok(weak.score > strong.score);
+});
+
+test("computer front scoring prefers the weak reachable opponent", () => {
+  const state = createAiStrategicWarTestState();
+
+  const weakFront = scoreFront(state, 1, 2);
+  const strongFront = scoreFront(state, 1, 3);
+  const plan = createStrategicPlan(state, 1);
+
+  assert.ok(weakFront.sharedBorderLength > 0);
+  assert.ok(weakFront.score > strongFront.score);
+  assert.equal(plan.targetPlayerId, 2);
+});
+
+test("computer local power evaluation detects attack-ready fronts", () => {
+  const state = createAiStrategicWarTestState();
+  const weakFront = scoreFront(state, 1, 2);
+
+  const power = evaluateLocalPower(state, 1, 2, weakFront.enemyTiles);
+
+  assert.ok(power.ownPower > 0);
+  assert.ok(power.enemyPower > 0);
+  assert.ok(power.attackableTargetCount > 0);
+  assert.equal(power.canAttack, true);
+});
+
+test("computer cutoff scoring rewards attacks that split enemy territory", () => {
+  const state = createAiCutoffTestState();
+
+  const bridgeCutoff = estimateCutoffValue(state, 1, "1,0");
+  const edgeCutoff = estimateCutoffValue(state, 1, "1,-1");
+
+  assert.ok(bridgeCutoff > 0);
+  assert.ok(bridgeCutoff > edgeCutoff);
+});
+
+test("computer keeps a finishing target for several turns", () => {
+  const state = createAiStrategicWarTestState();
+  state.tiles.push(
+    { ...createTile(-2, 2, 3), building: { type: "farm" } },
+    { ...createTile(0, -1, 3), building: { type: "farm" } },
+    { ...createTile(-1, -1, 3), building: { type: "farm" } },
+    { ...createTile(0, 2, 3), building: { type: "farm" } }
+  );
+  state.aiMemory = {
+    1: {
+      targetPlayerId: 2,
+      commitmentTurns: 2,
+      lastPlannedTurn: 0,
+      lastScore: 10
+    }
+  };
+  state.turnNumber = 3;
+
+  const weakFront = scoreFront(state, 1, 2);
+  const strongerNewFront = scoreFront(state, 1, 3);
+
+  const plan = createStrategicPlan(state, 1);
+
+  assert.ok(strongerNewFront.score > weakFront.score);
+  assert.equal(plan.targetPlayerId, 2);
+  assert.equal(state.aiMemory[1].commitmentTurns, 1);
+});
+
 test("save/load serialization keeps state data", () => {
   const state = createNewGame({ size: "small", playerCount: 2 });
   state.players[0].money = 42;
@@ -689,6 +769,72 @@ function createAiGroupMovementTestState() {
       createTile(3, 1, 2),
       createTile(4, 0, 1),
       createTile(4, -1, 1)
+    ],
+    phase: "playing"
+  };
+}
+
+function createAiStrategicWarTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 1,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 80, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Weak Enemy", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true },
+      { id: 3, name: "Large Enemy", color: "#4f9d5d", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      { ...createTile(0, 0, 1), building: { type: "city" } },
+      createTile(1, 0, 1, { ownerId: 1, level: 3, acted: false }),
+      createTile(1, -1, 1, { ownerId: 1, level: 2, acted: false }),
+      createTile(0, 1, 1),
+      createTile(-1, 1, 1, { ownerId: 1, level: 1, acted: false }),
+      createTile(-1, 0, 1),
+      createTile(2, 0, 2),
+      createTile(2, -1, 2, { ownerId: 2, level: 1, acted: false }),
+      { ...createTile(3, -1, 2), building: { type: "city" } },
+      { ...createTile(-2, 1, 3), building: { type: "city" } },
+      createTile(-2, 0, 3, { ownerId: 3, level: 2, acted: false }),
+      createTile(-3, 0, 3),
+      createTile(-3, 1, 3),
+      createTile(-4, 1, 3),
+      createTile(-4, 2, 3),
+      createTile(3, -2, 3),
+      createTile(4, -2, 3)
+    ],
+    phase: "playing"
+  };
+}
+
+function createAiCutoffTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 1,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 50, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      createTile(0, 0, 1, { ownerId: 1, level: 4, acted: false }),
+      createTile(0, -1, 1),
+      createTile(1, 0, 2),
+      createTile(1, -1, 2),
+      { ...createTile(2, 0, 2), building: { type: "city" } },
+      createTile(3, 0, 2)
     ],
     phase: "playing"
   };
