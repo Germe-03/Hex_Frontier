@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hex Frontier</title>
+    <link rel="stylesheet" href="./styles/main.css?v=3">
+  </head>
+  <body>
+    <div id="app">
+      <section id="start-menu" class="menu-screen">
+        <div class="menu-panel">
+          <div class="menu-title">
+            <p class="eyebrow">Local hotseat strategy</p>
+            <h1>Hex Frontier</h1>
+          </div>
+
+          <div class="menu-grid">
+            <label>
+              Map size
+              <select id="map-size">
+                <option value="small">Small</option>
+                <option value="medium" selected>Medium</option>
+                <option value="large">Large</option>
+              </select>
+            </label>
+
+            <label>
+              Players
+              <select id="player-count">
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="player-fields" class="player-fields"></div>
+
+          <div class="menu-actions">
+            <button id="new-game-button" class="primary">New Game</button>
+            <button id="menu-load-button">Load Game</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="game-screen" class="game-screen hidden">
+        <header class="topbar">
+          <div class="turn-block">
+            <span id="current-player-dot" class="player-dot"></span>
+            <div>
+              <p class="label">Current player</p>
+              <strong id="current-player">-</strong>
+            </div>
+          </div>
+
+          <div class="stat-row">
+            <div><span class="stat-label"><i class="coin-icon" aria-hidden="true"></i>Money</span><strong id="money-stat">0</strong></div>
+            <div><span>Gross</span><strong id="income-stat">0</strong></div>
+            <div><span>Upkeep</span><strong id="upkeep-stat">0</strong></div>
+            <div><span>Net</span><strong id="net-stat">0</strong></div>
+            <div><span>Round</span><strong id="round-stat">1</strong></div>
+          </div>
+        </header>
+
+        <main class="play-area">
+          <canvas id="game-canvas"></canvas>
+          <aside class="side-panel">
+            <section class="panel-section">
+              <h2>Selected Tile</h2>
+              <div id="selected-info" class="info-list"></div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Actions</h2>
+              <div class="action-grid">
+                <button id="buy-unit-button">Buy Level 1 Unit</button>
+                <button id="upgrade-unit-button">Upgrade Unit</button>
+                <button id="build-farm-button">Build Farm</button>
+                <button id="build-city-button">Build Town</button>
+                <button id="build-tower-button">Build Tower</button>
+                <button id="build-strong-tower-button">Build Strong Tower</button>
+              </div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Game</h2>
+              <div class="action-grid">
+                <button id="end-turn-button" class="primary">End Turn</button>
+                <button id="save-game-button">Save Game</button>
+                <button id="hud-load-button">Load Game</button>
+                <button id="hud-new-game-button">New Game</button>
+              </div>
+            </section>
+
+            <section id="end-statistics-section" class="panel-section end-statistics hidden">
+              <h2>End Statistics</h2>
+              <div id="end-statistics" class="end-stat-list"></div>
+            </section>
+
+            <p id="status-message" class="status-message"></p>
+          </aside>
+        </main>
+      </section>
+
+      <section id="turn-transition" class="turn-transition hidden">
+        <div class="transition-panel">
+          <span id="transition-dot" class="player-dot large"></span>
+          <p class="label">Next turn</p>
+          <h2 id="transition-title">Player turn</h2>
+          <button id="continue-turn-button" class="primary">Start Turn</button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./src/main.js?v=14"></script>
+  </body>
+</html>
