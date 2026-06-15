@@ -58,7 +58,6 @@ function handleLoadGame() {
     return;
   }
   state = result.state;
-  normalizeLoadedPlayers(state);
   renderer.setState(state);
   menu.hide();
   enterCurrentTurn(result.message);
@@ -185,12 +184,6 @@ function showTransition() {
   document.getElementById("transition-dot").style.background = player?.color ?? "#999";
   document.getElementById("transition-title").textContent = `${player?.name ?? "Player"}'s turn`;
   overlay.classList.remove("hidden");
-}
-
-function normalizeLoadedPlayers(loadedState) {
-  if (!loadedState.players.some((player) => player.isHuman)) {
-    loadedState.players[0].isHuman = true;
-  }
 }
 
 function shouldShowHumanTurnTransition(currentState) {

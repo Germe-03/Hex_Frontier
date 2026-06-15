@@ -4,7 +4,7 @@ import { createUnit } from "./units.js";
 
 export function createPlayers(count, names = [], colors = [], types = []) {
   const safeCount = clamp(count, RULES.minPlayers, RULES.maxPlayers);
-  const safeTypes = ensureAtLeastOneHuman(types, safeCount);
+  const safeTypes = normalizePlayerTypes(types, safeCount);
   return Array.from({ length: safeCount }, (_, index) => ({
     id: index + 1,
     name: names[index]?.trim() || (safeTypes[index] === "computer" ? `Computer ${index + 1}` : `Player ${index + 1}`),
@@ -415,12 +415,8 @@ function scoreStartCandidate(candidate, targetAngle, selected) {
   return angleDistance + crowdingPenalty;
 }
 
-function ensureAtLeastOneHuman(types, count) {
-  const normalized = Array.from({ length: count }, (_, index) => types[index] === "computer" ? "computer" : "human");
-  if (!normalized.some((type) => type === "human")) {
-    normalized[0] = "human";
-  }
-  return normalized;
+function normalizePlayerTypes(types, count) {
+  return Array.from({ length: count }, (_, index) => types[index] === "computer" ? "computer" : "human");
 }
 
 function clamp(value, min, max) {

@@ -46,9 +46,6 @@ export function createMenuController({ onNewGame, onLoadGame }) {
       colors.push(document.querySelector(`[data-player-color="${index}"]`).value);
       types.push(document.querySelector(`[data-player-type="${index}"]`).value);
     }
-    if (!types.includes("human")) {
-      types[0] = "human";
-    }
     return {
       size: mapSize.value,
       playerCount: count,

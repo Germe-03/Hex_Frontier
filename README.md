@@ -57,7 +57,7 @@ README.md
 
 ## Core Mechanics
 
-Two to eight factions can play. Each faction can be set to Human for local hotseat play or Computer for a simple deterministic AI turn. This supports a single human against up to seven computer opponents, or up to eight humans on the same device.
+Two to eight factions can play. Each faction can be set to Human for local hotseat play or Computer for a simple deterministic AI turn. This supports a single human against up to seven computer opponents, up to eight humans on the same device, or fully computer-only games.
 
 Players take turns in order. On each turn the active player earns money from owned land, towns, and farms, pays unit upkeep, then can buy units, upgrade units, build, move, capture, save, or end the turn.
 

@@ -86,6 +86,18 @@ test("player setup supports one human with computer opponents", () => {
   assert.equal(state.players.filter((player) => !player.isHuman).length, 7);
 });
 
+test("player setup supports computer-only games", () => {
+  const state = createNewGame({
+    size: "small",
+    playerCount: 4,
+    playerTypes: ["computer", "computer", "computer", "computer"]
+  });
+
+  assert.equal(state.players.length, 4);
+  assert.equal(state.players.filter((player) => player.isHuman).length, 0);
+  assert.equal(state.players.filter((player) => !player.isHuman).length, 4);
+});
+
 test("income calculation includes owned tiles and farms", () => {
   const state = createNewGame({ size: "small", playerCount: 2 });
   const playerId = state.players[0].id;
@@ -418,6 +430,23 @@ test("computer turn can perform deterministic actions", () => {
   const report = runComputerTurn(state);
   assert.ok(report.actions.length > 0);
   assert.ok(state.tiles.some((tile) => tile.unit?.ownerId === 2 && tile.unit.acted));
+});
+
+test("computer-only games can advance through AI turns", () => {
+  const state = createNewGame({
+    size: "small",
+    playerCount: 2,
+    playerTypes: ["computer", "computer"]
+  });
+  startTurn(state, 1);
+
+  const report = runComputerTurn(state);
+  const result = endTurn(state);
+
+  assert.ok(report.actions.length > 0);
+  assert.equal(result.ok, true);
+  assert.equal(state.currentPlayerId, 2);
+  assert.equal(state.players.filter((player) => player.isHuman).length, 0);
 });
 
 test("computer builds defensive towers on threatened valuable border fields", () => {
