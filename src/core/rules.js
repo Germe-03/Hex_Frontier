@@ -35,6 +35,9 @@ export const RULES = Object.freeze({
   cities: {
     minimumRegionSize: 2
   },
+  ai: {
+    debug: false
+  },
   units: {
     1: {
       name: "Peasant",

@@ -2,12 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canBuildTowerSmart,
+  canBuildTownSmart,
+  chooseStrategicMode,
   createStrategicPlan,
   evaluateEnemyWeakness,
   evaluateLocalPower,
   estimateCutoffValue,
+  getDisconnectedRegionCount,
+  getLargestOwnedRegion,
+  getOwnedRegions,
   runComputerTurn,
-  scoreFront
+  scoreExpansionCompactness,
+  scoreFront,
+  scoreNeutralExpansion,
+  scoreTownBuild,
+  wouldConnectOwnRegions,
+  wouldFillNeutralHole
 } from "../src/core/ai.js";
 import { buildBuilding, canBuild, getBuildingCost } from "../src/core/buildings.js";
 import { canCapture, captureTile } from "../src/core/combat.js";
@@ -19,7 +30,7 @@ import { RULES } from "../src/core/rules.js";
 import { deserializeState, serializeState } from "../src/storage/saveLoad.js";
 import { getEndGameEconomyStats } from "../src/core/statistics.js";
 import { normalizeRegionalCities } from "../src/core/territory.js";
-import { endTurn, startTurn } from "../src/core/turnSystem.js";
+import { endTurn, startTurn, updateEliminations } from "../src/core/turnSystem.js";
 import { buyUnit, canBuyUnit, canMoveInsideOwnedTerritory, getUpgradeCost, moveInsideOwnedTerritory } from "../src/core/units.js";
 
 const MIN_TRIPLE_TILE_COUNTS = Object.freeze({
@@ -409,6 +420,35 @@ test("turn switching advances to the next alive player", () => {
   assert.equal(state.currentPlayerId, 2);
 });
 
+test("player with no owned tiles is eliminated", () => {
+  const state = createEliminationTestState();
+
+  updateEliminations(state);
+
+  assert.equal(state.players.find((player) => player.id === 2).isAlive, false);
+});
+
+test("eliminated players are skipped in turn order", () => {
+  const state = createEliminationTestState();
+  state.currentPlayerId = 1;
+
+  const result = endTurn(state);
+
+  assert.equal(result.ok, true);
+  assert.equal(state.currentPlayerId, 3);
+  assert.equal(state.players.find((player) => player.id === 2).isAlive, false);
+});
+
+test("eliminated AI player does not act", () => {
+  const state = createEliminationTestState();
+  state.currentPlayerId = 2;
+
+  const report = runComputerTurn(state);
+
+  assert.deepEqual(report.actions, []);
+  assert.equal(state.players.find((player) => player.id === 2).isAlive, false);
+});
+
 test("turn economy statistics remember who had the highest income costs and profit", () => {
   const state = createEconomyStatisticsTestState();
 
@@ -570,6 +610,103 @@ test("computer keeps a finishing target for several turns", () => {
   assert.equal(state.aiMemory[1].commitmentTurns, 1);
 });
 
+test("owned region helpers detect disconnected territories", () => {
+  const state = createRegionAnalysisTestState();
+
+  assert.equal(getOwnedRegions(1, state).length, 2);
+  assert.equal(getLargestOwnedRegion(1, state).length, 2);
+  assert.equal(getDisconnectedRegionCount(1, state), 1);
+  assert.equal(wouldConnectOwnRegions("2,0", 1, state), true);
+});
+
+test("neutral hole detection and compactness scoring prefer filled territory", () => {
+  const state = createNeutralHoleTestState();
+
+  assert.equal(wouldFillNeutralHole("0,0", 1, state), true);
+  assert.ok(scoreExpansionCompactness("0,0", 1, state) > scoreExpansionCompactness("3,0", 1, state));
+});
+
+test("late neutral expansion remains a high priority", () => {
+  const state = createNeutralHoleTestState();
+  state.roundNumber = 45;
+
+  assert.ok(scoreNeutralExpansion("0,0", 1, state) > 180);
+  assert.ok(scoreNeutralExpansion("0,0", 1, state) > scoreNeutralExpansion("3,0", 1, state));
+});
+
+test("neutral hole cleanup beats tower construction when there is no immediate threat", () => {
+  const state = createNeutralCleanupAiTestState();
+
+  const report = runComputerTurn(state);
+
+  assert.ok(report.actions.some((action) => action === "captured 0,0"));
+  assert.ok(report.actions.every((action) => !action.startsWith("built tower") && !action.startsWith("built strongTower")));
+  assert.equal(state.tiles.find((tile) => tile.id === "0,0").ownerId, 1);
+});
+
+test("town smart placement accepts safe interior tiles", () => {
+  const state = createTownStrategyTestState();
+
+  assert.equal(canBuildTownSmart("0,0", 1, state), true);
+});
+
+test("town smart placement rejects enemy pressure and nearby towns", () => {
+  const nearEnemy = createTownStrategyTestState();
+  nearEnemy.tiles.push(createTile(0, 2, 2));
+
+  const nearTown = createTownStrategyTestState();
+  nearTown.tiles.find((tile) => tile.id === "2,0").building = { type: "city" };
+
+  assert.equal(canBuildTownSmart("0,0", 1, nearEnemy), false);
+  assert.equal(canBuildTownSmart("0,0", 1, nearTown), false);
+});
+
+test("weak economy increases town score and triggers economy mode", () => {
+  const stable = createTownStrategyTestState();
+  const strained = createTownStrategyTestState();
+  strained.tiles.find((tile) => tile.id === "1,0").unit = { ownerId: 1, level: 4, acted: false };
+  strained.tiles.find((tile) => tile.id === "0,1").unit = { ownerId: 1, level: 3, acted: false };
+
+  assert.ok(scoreTownBuild("0,0", 1, strained) > scoreTownBuild("0,0", 1, stable));
+  assert.equal(chooseStrategicMode(strained, 1), "BUILD_ECONOMY");
+});
+
+test("tower gating blocks neutral borders and safe interior tiles", () => {
+  const neutralBorder = createTowerGateTestState({ neutralBorder: true });
+  const safeInterior = createTownStrategyTestState();
+  safeInterior.roundNumber = 45;
+
+  assert.equal(canBuildTowerSmart("0,0", 1, neutralBorder), false);
+  assert.equal(canBuildTowerSmart("0,0", 1, safeInterior), false);
+});
+
+test("tower gating allows threatened borders but blocks close clusters and early strong towers", () => {
+  const threatened = createTowerGateTestState({ threatened: true });
+  const clustered = createTowerGateTestState({ threatened: true, nearbyTower: true });
+  const earlyStrong = createTowerGateTestState({ threatened: true, roundNumber: 30 });
+
+  assert.equal(canBuildTowerSmart("0,0", 1, threatened), true);
+  assert.equal(canBuildTowerSmart("0,0", 1, clustered), false);
+  assert.equal(canBuildTowerSmart("0,0", 1, earlyStrong, "strongTower"), false);
+});
+
+test("tower gating respects maximum tower count", () => {
+  const state = createTowerLimitTestState();
+
+  assert.equal(canBuildTowerSmart("0,0", 1, state), false);
+});
+
+test("strategic mode selection detects reconnect, late cleanup, and defense", () => {
+  const reconnect = createRegionAnalysisTestState();
+  const cleanup = createNeutralHoleTestState();
+  cleanup.roundNumber = 45;
+  const defense = createTowerGateTestState({ threatened: true });
+
+  assert.equal(chooseStrategicMode(reconnect, 1), "RECONNECT_REGIONS");
+  assert.equal(chooseStrategicMode(cleanup, 1), "CLEANUP_NEUTRAL_FIELDS");
+  assert.equal(chooseStrategicMode(defense, 1), "DEFEND_CRITICAL_FRONT");
+});
+
 test("save/load serialization keeps state data", () => {
   const state = createNewGame({ size: "small", playerCount: 2 });
   state.players[0].money = 42;
@@ -647,6 +784,191 @@ function countPlayableLandRegions(tiles) {
   }
 
   return regions.length;
+}
+
+function createEliminationTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 1,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Player 1", color: "#d45f4a", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true },
+      { id: 2, name: "Computer 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 3, name: "Player 3", color: "#4f9d5d", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      { ...createTile(0, 0, 1), building: { type: "city" } },
+      createTile(1, 0, 1),
+      { ...createTile(4, 0, 3), building: { type: "city" } },
+      createTile(5, 0, 3)
+    ],
+    phase: "playing"
+  };
+}
+
+function createRegionAnalysisTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 20,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 50, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      createTile(0, 0, 1),
+      createTile(1, 0, 1),
+      createTile(2, 0, null),
+      createTile(3, 0, 1),
+      createTile(4, 0, 1)
+    ],
+    phase: "playing"
+  };
+}
+
+function createNeutralHoleTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 20,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 50, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      createTile(0, 0, null),
+      createTile(1, 0, 1),
+      createTile(1, -1, 1),
+      createTile(0, -1, 1),
+      createTile(-1, 0, 1),
+      createTile(-1, 1, 1),
+      createTile(0, 1, 1),
+      createTile(2, 0, 1),
+      createTile(3, 0, null)
+    ],
+    phase: "playing"
+  };
+}
+
+function createNeutralCleanupAiTestState() {
+  const state = createNeutralHoleTestState();
+  state.roundNumber = 45;
+  state.tiles.find((tile) => tile.id === "1,0").unit = { ownerId: 1, level: 1, acted: false };
+  state.tiles.find((tile) => tile.id === "-1,1").building = { type: "city" };
+  return state;
+}
+
+function createTownStrategyTestState() {
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 35,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 100, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      createTile(0, 0, 1),
+      createTile(1, 0, 1),
+      createTile(1, -1, 1),
+      createTile(0, -1, 1),
+      createTile(-1, 0, 1),
+      createTile(-1, 1, 1),
+      createTile(0, 1, 1),
+      createTile(2, 0, 1),
+      createTile(3, 0, 1),
+      { ...createTile(4, 0, 1), building: { type: "city" } }
+    ],
+    phase: "playing"
+  };
+}
+
+function createTowerGateTestState({ threatened = false, neutralBorder = false, nearbyTower = false, roundNumber = 45 } = {}) {
+  const borderTile = neutralBorder
+    ? createTile(1, 0, null)
+    : threatened
+      ? createTile(1, 0, 2, { ownerId: 2, level: 2, acted: false })
+      : createTile(1, 0, 1);
+
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 100, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles: [
+      createTile(0, 0, 1),
+      borderTile,
+      createTile(1, -1, 1),
+      createTile(0, -1, 1),
+      createTile(-1, 0, nearbyTower ? 1 : 1),
+      { ...createTile(-1, 1, 1), building: { type: "city" } },
+      createTile(0, 1, 1)
+    ].map((tile) => (
+      nearbyTower && tile.id === "-1,0"
+        ? { ...tile, building: { type: "tower" } }
+        : tile
+    )),
+    phase: "playing"
+  };
+}
+
+function createTowerLimitTestState() {
+  const tiles = Array.from({ length: 24 }, (_, index) => createTile(index - 12, 0, 1));
+  tiles.find((tile) => tile.id === "2,0").building = { type: "tower" };
+  tiles.find((tile) => tile.id === "-2,0").building = { type: "tower" };
+  tiles.find((tile) => tile.id === "1,0").ownerId = 2;
+  tiles.find((tile) => tile.id === "1,0").unit = { ownerId: 2, level: 2, acted: false };
+
+  return {
+    version: RULES.version,
+    currentPlayerId: 1,
+    turnNumber: 1,
+    roundNumber: 35,
+    winnerId: null,
+    selectedTileId: null,
+    actionMode: "select",
+    lastMessage: "",
+    log: [],
+    players: [
+      { id: 1, name: "Computer 1", color: "#d45f4a", money: 100, income: 0, upkeep: 0, isAlive: true, isHuman: false },
+      { id: 2, name: "Player 2", color: "#3f79d8", money: 0, income: 0, upkeep: 0, isAlive: true, isHuman: true }
+    ],
+    tiles,
+    phase: "playing"
+  };
 }
 
 function createCombatTestState() {
